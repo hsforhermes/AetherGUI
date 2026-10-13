@@ -1,0 +1,22 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    # The app is macOS-only; there is no Linux build path.
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compile
+        # Full typecheck into a throwaway binary. Not `swiftc -parse`, which
+        # only checks syntax and lets type errors through. The bundle and
+        # codesign steps of build.sh are skipped — they write to
+        # ~/Applications and need a real machine.
+        run: swiftc -o /tmp/aethergui-typecheck main.swift

@@ -1,0 +1,10 @@
+# Build output
+AetherGUI
+
+# Generated Verge profile — contains live node credentials from your
+# subscription, so it is never committed. Regenerate with
+# ./make-verge-profile.sh whenever your subscription changes.
+verge-aether.yaml
+
+# macOS
+.DS_Store
