@@ -10,15 +10,17 @@ swiftc -O -o AetherGUI main.swift
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp AetherGUI "$APP/Contents/MacOS/Aether"
 
-# Dock / Finder icon. assets/AppIcon.icns is the built icon set; rebuild it
-# from assets/icon.png with `iconutil -c icns assets/AppIcon.iconset` if you
-# change the source artwork.
+# Dock / Finder icon. Generated from assets/icon_pack/icon_color.svg by
+# ./make-app-icon.sh, which round-trips the result through iconutil to verify
+# all 10 resolutions are present. Re-run it if you change the source artwork.
 if [ -f assets/AppIcon.icns ]; then
   cp assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 fi
 
-# Menu-bar glyph. Read at runtime from the bundle so the app falls back to the
-# SF Symbol if the file is missing.
+# Menu-bar glyph. Generated from assets/icon_pack/icon_template.svg by
+# ./make-menubar-icon.sh at 54px, so macOS never upscales it on a Retina
+# display; main.swift declares it as 18x18 POINTS. Read at runtime from the
+# bundle so the app falls back to the SF Symbol if the file is missing.
 if [ -f assets/menubar_18.png ]; then
   cp assets/menubar_18.png "$APP/Contents/Resources/MenuBarIcon.png"
 fi

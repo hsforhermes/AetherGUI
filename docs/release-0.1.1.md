@@ -16,18 +16,26 @@ template image, so macOS handles light/dark menu bars and the pressed state for
 free. If the file is missing the app falls back to the SF Symbol rather than
 showing nothing — verified by removing the resource and relaunching.
 
+**Sharp on Retina.** The glyph is rendered from the vector at **54px** and
+declared as **18×18 points**. macOS turns points into physical pixels with the
+display's backing scale factor (18pt → 18px at 1×, 36px at 2×, 54px at 3×), so
+rendering at the largest of those means nothing is ever *upscaled* — and
+upscaling is what made the icon look blurry. Measured on this artwork, the
+fraction of semi-transparent edge pixels falls with resolution: 21.0% at 18px,
+11.7% at 36px, **7.4% at 54px**.
+
 **Both icons are generated from vector art.** `assets/icon_pack/` is the source
 of truth, and two scripts turn it into what the app ships:
 
 ```bash
 ./make-app-icon.sh       # icon_color.svg    -> AppIcon.icns  (10 resolutions)
-./make-menubar-icon.sh   # icon_template.svg -> menubar_18.png
+./make-menubar-icon.sh   # icon_template.svg -> menubar_18.png (54px)
 ```
 
-Each renders the SVG at its exact target size with `rsvg-convert` and verifies
-its own output — the icon script round-trips the `.icns` through `iconutil` to
-confirm all 10 resolutions are present, and the menu-bar script refuses to emit
-a file with no alpha channel rather than shipping an opaque box.
+Each renders the SVG with `rsvg-convert` and verifies its own output — the icon
+script round-trips the `.icns` through `iconutil` to confirm all 10 resolutions
+are present, and the menu-bar script refuses to emit a file with no alpha
+channel rather than shipping an opaque box.
 
 **Why bitmaps were rejected, in case the artwork changes again.** Two earlier
 attempts are worth recording so nobody repeats them:
@@ -39,8 +47,8 @@ attempts are worth recording so nobody repeats them:
   symbol, and keying on colour destroys the shading — 11 of 324 pixels survived
   at 18 px.
 - The photo-derived `removebg` PNG was better but still soft: a mid-gray glyph
-  (36/255) with 25.6% semi-transparent edge pixels, against 0/255 and 21.0% for
-  the vector template.
+  (36/255) with 25.6% semi-transparent edge pixels, against 0/255 and 7.4% for
+  the 54px vector template.
 - `assets/icon.png` was a traced bitmap with an opaque background baked in
   (44.8% transparent, vs 70.1% for the vector), so the Dock icon showed that
   background as a solid plate.

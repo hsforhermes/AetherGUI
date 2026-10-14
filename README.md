@@ -71,14 +71,38 @@ Both are generated from vector sources in `assets/icon_pack/`, which is the
 source of truth for the artwork:
 
 ```bash
-./make-app-icon.sh       # icon_color.svg  -> AppIcon.icns (10 resolutions)
-./make-menubar-icon.sh   # icon_template.svg -> menubar_18.png
+./make-app-icon.sh       # icon_color.svg    -> AppIcon.icns  (10 resolutions)
+./make-menubar-icon.sh   # icon_template.svg -> menubar_18.png (54px)
 ```
 
-Both render the SVG at its exact target size with `rsvg-convert` and verify
-their own output — the icon script round-trips the `.icns` through `iconutil`
-to confirm all 10 resolutions are present, and the menu-bar script refuses to
-emit a file with no alpha channel rather than shipping an opaque box.
+Both render the SVG with `rsvg-convert` and verify their own output — the icon
+script round-trips the `.icns` through `iconutil` to confirm all 10 resolutions
+are present, and the menu-bar script refuses to emit a file with no alpha
+channel rather than shipping an opaque box.
+
+### Why the menu-bar glyph is 54px but named `menubar_18.png`
+
+`main.swift` declares the image as **18×18 points, not pixels**. macOS converts
+points to physical pixels using the display's backing scale factor:
+
+| Display | Physical pixels for 18pt |
+|---|---|
+| 1× (non-Retina) | 18px — downscaled, still sharp |
+| 2× (Retina) | 36px — native |
+| 3× (Retina) | 54px — native |
+
+Shipping art at the largest size means macOS never has to **upscale** anything,
+and upscaling is what makes a menu-bar icon look blurry. The soft-edge
+measurement on this artwork, going up in resolution:
+
+| Source resolution | Semi-transparent edge pixels |
+|---|---|
+| 18px | 21.0% |
+| 36px | 11.7% |
+| 54px | 7.4% |
+
+The filename keeps the `18` for continuity with the point size; the pixel count
+is what the script controls.
 
 Two notes if you swap the artwork:
 
@@ -86,7 +110,9 @@ Two notes if you swap the artwork:
   its background is baked into the pixels and the menu bar renders a solid box.
   Chroma-keying it back out fails too: the glyph is a dark, shaded symbol, and
   keying on colour destroys the shading.
-- `rsvg-convert` comes from `brew install librsvg`; `iconutil` ships with Xcode.
+- If you change the point size in `main.swift`, re-render at the new size × 3.
+
+`rsvg-convert` comes from `brew install librsvg`; `iconutil` ships with Xcode.
 
 Because the signature is ad-hoc, the first launch may need a right-click →
 **Open**. After that it opens normally.

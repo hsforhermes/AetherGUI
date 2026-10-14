@@ -165,6 +165,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// without recompiling; falls back to an SF Symbol when absent.
     /// Marked as a template image so macOS tints it for dark/light menu bars
     /// and the active/pressed states.
+    ///
+    /// `size` is in POINTS, not pixels. The bundled PNG is 36px so that a
+    /// Retina display (2x backing scale) gets native-resolution art — declaring
+    /// 18x18 points against 36x36 pixels means the menu bar has to upscale
+    /// nothing and the glyph stays sharp. An 18px bitmap here would be scaled
+    /// up to fill a 36px slot, which is what made the icon look blurry.
     private func menuBarImage() -> NSImage? {
         guard let url = Bundle.main.url(forResource: "MenuBarIcon",
                                        withExtension: "png"),
