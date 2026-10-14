@@ -39,6 +39,14 @@ struct Cfg {
         get { d.string(forKey: "bind") ?? kDefaultBind }
         set { d.set(newValue, forKey: "bind") }
     }
+    /// The host half of `bind` ("127.0.0.1" from "127.0.0.1:1819").
+    static var host: String {
+        bind.split(separator: ":", maxSplits: 1).first.map(String.init) ?? "127.0.0.1"
+    }
+    /// This app's pid, passed to the /bin/sh tunnel wrapper so it can tear the
+    /// tunnel down if the GUI is force-quit or crashes. Captured once at launch;
+    /// the GUI is a single long-lived process, so it never changes.
+    static let watchPID: String = String(ProcessInfo.processInfo.processIdentifier)
     static var extra: String {
         get { d.string(forKey: "extra") ?? "" }
         set { d.set(newValue, forKey: "extra") }
@@ -577,33 +585,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func start() {
         guard proc == nil else { return }
-        if portBusy() {
-            alert("Port \(Cfg.port) is already in use",
-                  "Another program is listening on \(Cfg.bind).\n"
-                    + "Stop it, or change the SOCKS5 address in Advanced.")
+        if let owner = portOwner() {
+            // The most common cause is our own orphaned tunnel from a previous
+            // session that was force-quit or crashed. Offer to clear that.
+            if orphanPID != nil {
+                offerToClearOrphan(owner: owner)
+            } else {
+                alert("Port \(Cfg.port) is already in use",
+                      "Another program (\(owner)) is listening on \(Cfg.bind).\n"
+                        + "Stop it, or change the SOCKS5 address in Advanced.")
+            }
             return
         }
         let args = buildArgs()
         appendLog("» aether " + args.joined(separator: " "))
 
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: kAetherBin)
-        p.currentDirectoryURL = URL(fileURLWithPath: kAetherDir)
-        p.arguments = args
-        p.environment = ProcessInfo.processInfo.environment
-
         let pipe = Pipe()
-        p.standardOutput = pipe
-        p.standardError = pipe
-        let handle = pipe.fileHandleForReading
-        handle.readabilityHandler = { [weak self] h in
+
+        // Keep the tunnel from outliving us. If this GUI is force-quit or
+        // crashes, the normal terminate path never runs, so the tunnel
+        // reparents to launchd (ppid 1) and keeps the SOCKS5 port bound —
+        // blocking every later launch with "port already in use".
+        //
+        // A watchdog inside THIS process cannot help: it dies the instant the
+        // GUI does. So we launch the tunnel through a tiny /bin/sh wrapper that
+        // outlives us and kills the tunnel when it notices the GUI is gone.
+        // The wrapper watches the GUI's pid ($$ is not available to us, so we
+        // pass our own pid) and forwards SIGTERM/SIGINT to the child so a clean
+        // quit still stops the tunnel promptly.
+        let shim = Process()
+        shim.executableURL = URL(fileURLWithPath: "/bin/sh")
+        shim.currentDirectoryURL = URL(fileURLWithPath: kAetherDir)
+        shim.environment = ProcessInfo.processInfo.environment
+        shim.arguments = ["-c", """
+            "$1" "${@:2}" &
+            child=$!
+            gui=\(Cfg.watchPID)
+            trap 'kill -TERM $child 2>/dev/null' TERM INT
+            while kill -0 "$gui" 2>/dev/null; do
+              if ! kill -0 "$child" 2>/dev/null; then exit 0; fi
+              sleep 0.5
+            done
+            # GUI is gone — take the tunnel down with it.
+            kill -TERM "$child" 2>/dev/null
+            sleep 1
+            kill -KILL "$child" 2>/dev/null
+            """,
+            "sh", kAetherBin] + args
+        // `sh -c 'script' name arg1 arg2...` puts "sh" in $0, the binary in $1.
+        shim.standardOutput = pipe
+        shim.standardError = pipe
+        let shimHandle = pipe.fileHandleForReading
+        shimHandle.readabilityHandler = { [weak self] h in
             let data = h.availableData
             if data.isEmpty { return }
             let text = String(decoding: data, as: UTF8.self)
             DispatchQueue.main.async { self?.appendLog(text) }
         }
-
-        p.terminationHandler = { [weak self] _ in
+        // The Process we track for clean stop() is the shim; terminating it
+        // trips its trap, which tears down the real tunnel.
+        shim.terminationHandler = { [weak self] _ in
             DispatchQueue.main.async {
                 self?.proc = nil
                 self?.connected = false
@@ -613,8 +654,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
 
         do {
-            try p.run()
-            proc = p
+            try shim.run()
+            proc = shim
             connected = false
             rebuildMenu()
         } catch {
@@ -631,7 +672,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    private func portBusy() -> Bool {
+    /// Who is listening on our SOCKS5 port, if anyone. Returns nil when the
+    /// port is free, otherwise the command name of the process holding it.
+    ///
+    /// Matches the exact `host:port` token (`127.0.0.1:1819`) rather than any
+    /// line containing a colon — the old `out.contains(":")` matched the lsof
+    /// header and the address column of unrelated entries, reporting the port
+    /// as busy when it wasn't.
+    private func portOwner() -> String? {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
         task.arguments = ["-nP", "-iTCP:\(Cfg.port)", "-sTCP:LISTEN"]
@@ -639,8 +687,74 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         task.standardOutput = pipe
         try? task.run()
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        let out = String(decoding: data, as: UTF8.self)
-        return out.contains(":")
+        guard let out = String(data: data, encoding: .utf8) else { return nil }
+
+        let target = "\(Cfg.host):\(Cfg.port)"
+        for line in out.split(separator: "\n") {
+            guard line.contains(target) else { continue }
+            // Skip the header row; a real entry's NAME field is the
+            // host:port we matched.
+            let cols = line.split(separator: " ", omittingEmptySubsequences: true)
+            if cols.first?.uppercased() == "COMMAND" { continue }
+            if let cmd = cols.first { return String(cmd) }
+        }
+        return nil
+    }
+
+    /// Ask whether the orphaned-tunnel case applies and offer to clear it.
+    /// A previous GUI that was force-quit or crashed leaves its `aether` child
+    /// running (it reparents to launchd), so the port stays bound and every
+    /// later launch is blocked. That leftover is safe to kill — it is not ours.
+    private func offerToClearOrphan(owner: String) {
+        let a = NSAlert()
+        a.messageText = "Port \(Cfg.port) is already in use"
+        a.informativeText = "A leftover Aether tunnel (\(owner), pid \(orphanPID ?? -1)) is still "
+            + "holding \(Cfg.bind).\n\n"
+            + "This happens when the app is force-quit or crashes and leaves its "
+            + "tunnel running. Stop that leftover and start a fresh one?"
+        a.addButton(withTitle: "Stop leftover & connect")
+        a.addButton(withTitle: "Cancel")
+        if a.runModal() != .alertFirstButtonReturn { return }
+
+        killOrphan()
+        // Give the socket time to release before binding.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.start()
+        }
+    }
+
+    /// Kill the orphaned tunnel process, if any.
+    private func killOrphan() {
+        guard let pid = orphanPID else { return }
+        appendLog("» stopping leftover tunnel (pid \(pid))…")
+        kill(pid, SIGTERM)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            // SIGTERM is polite; if it ignored that, force it.
+            if kill(pid, 0) == 0 { kill(pid, SIGKILL) }
+        }
+    }
+
+    /// The pid of any *foreign* `aether` process holding our port, i.e. one we
+    /// did not spawn this session (our own child is `proc`). nil if none.
+    private var orphanPID: Int32? {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/ps")
+        task.arguments = ["-Ao", "pid,command"]
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        try? task.run()
+        guard let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(),
+                              encoding: .utf8) else { return nil }
+        let mine = proc?.processIdentifier
+        for line in out.split(separator: "\n") {
+            let t = line.trimmingCharacters(in: .whitespaces)
+            guard t.contains(kAetherBin) && !t.contains("AetherGUI") else { continue }
+            let cols = t.split(separator: " ", omittingEmptySubsequences: true)
+            guard let pidStr = cols.first, let pid = Int32(pidStr) else { continue }
+            if pid == mine { continue }        // our own child, not an orphan
+            return pid
+        }
+        return nil
     }
 
     // MARK: log handling

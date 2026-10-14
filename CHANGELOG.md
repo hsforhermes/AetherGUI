@@ -39,3 +39,14 @@ Rebuild and relaunch:
 ```
 
 The icon only appears after a fresh build, since it lives in the bundle.
+
+## Unreleased
+
+- **Fix "port already in use" (orphaned tunnel).** A previous app instance that
+  was force-quit or crashed left its `aether` tunnel running, holding the SOCKS5
+  port and blocking every later launch. The tunnel now runs inside a `/bin/sh`
+  wrapper that watches the app's pid and takes the tunnel down when the app
+  disappears, so it can never outlive the app. As a backstop, if the port is
+  still held the app detects a leftover Aether tunnel and offers to stop it and
+  reconnect. Also fixed the port check itself, which matched any line with a
+  colon and reported the port busy when it wasn't.

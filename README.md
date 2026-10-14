@@ -112,6 +112,18 @@ Two notes if you swap the artwork:
   keying on colour destroys the shading.
 - If you change the point size in `main.swift`, re-render at the new size × 3.
 
+### The tunnel never outlives the app
+
+The `aether` tunnel runs inside a tiny `/bin/sh` wrapper (see `start()` in
+`main.swift`). The wrapper watches the app's pid and tears the tunnel down if
+the app disappears, so a force-quit or crash can't leave an orphan holding the
+SOCKS5 port and blocking the next launch with *"port already in use"*. A
+watchdog inside the app itself can't do this — it dies the instant the app does.
+
+As a backstop, if the port is somehow still held, the app now detects whether
+the holder is a leftover Aether tunnel and offers to stop it and reconnect,
+instead of just showing a dead-end error.
+
 `rsvg-convert` comes from `brew install librsvg`; `iconutil` ships with Xcode.
 
 Because the signature is ad-hoc, the first launch may need a right-click →
