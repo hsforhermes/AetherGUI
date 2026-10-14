@@ -161,6 +161,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     // MARK: lifecycle
 
+    /// The menu-bar glyph. Loaded from the bundle so the artwork can change
+    /// without recompiling; falls back to an SF Symbol when absent.
+    /// Marked as a template image so macOS tints it for dark/light menu bars
+    /// and the active/pressed states.
+    private func menuBarImage() -> NSImage? {
+        guard let url = Bundle.main.url(forResource: "MenuBarIcon",
+                                       withExtension: "png"),
+              let img = NSImage(contentsOf: url) else { return nil }
+        img.size = NSSize(width: 18, height: 18)
+        return img
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
@@ -176,8 +188,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        if let img = NSImage(systemSymbolName: "bolt.shield.fill",
-                             accessibilityDescription: "Aether") {
+        if let custom = menuBarImage() {
+            custom.isTemplate = true
+            statusItem.button?.image = custom
+        } else if let img = NSImage(systemSymbolName: "bolt.shield.fill",
+                                    accessibilityDescription: "Aether") {
             img.isTemplate = true
             statusItem.button?.image = img
         }

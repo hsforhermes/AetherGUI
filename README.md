@@ -59,6 +59,35 @@ This compiles `main.swift` with `swiftc -O`, bundles it as
 `~/Applications/Aether.app` with an `LSUIElement` (menu-bar only, no Dock icon),
 and ad-hoc signs it. Requires Xcode command-line tools.
 
+The build pulls the artwork out of `assets/`:
+
+- `assets/AppIcon.icns` → the Dock/Finder icon, wired up through
+  `CFBundleIconFile`.
+- `assets/menubar_18.png` → the menu-bar glyph, loaded from the bundle at
+  runtime. It is marked as a template image, so macOS tints it correctly for
+  light/dark menu bars and the pressed state.
+
+Both are generated from vector sources in `assets/icon_pack/`, which is the
+source of truth for the artwork:
+
+```bash
+./make-app-icon.sh       # icon_color.svg  -> AppIcon.icns (10 resolutions)
+./make-menubar-icon.sh   # icon_template.svg -> menubar_18.png
+```
+
+Both render the SVG at its exact target size with `rsvg-convert` and verify
+their own output — the icon script round-trips the `.icns` through `iconutil`
+to confirm all 10 resolutions are present, and the menu-bar script refuses to
+emit a file with no alpha channel rather than shipping an opaque box.
+
+Two notes if you swap the artwork:
+
+- **JPEG cannot be used for the menu-bar glyph.** JPEG has no alpha channel, so
+  its background is baked into the pixels and the menu bar renders a solid box.
+  Chroma-keying it back out fails too: the glyph is a dark, shaded symbol, and
+  keying on colour destroys the shading.
+- `rsvg-convert` comes from `brew install librsvg`; `iconutil` ships with Xcode.
+
 Because the signature is ad-hoc, the first launch may need a right-click →
 **Open**. After that it opens normally.
 
@@ -116,6 +145,14 @@ is deliberately gitignored — it contains live credentials.
 
 ## License
 
-AGPL-3.0. This app drives Aether, which is AGPL-3.0, so it inherits the same
-terms: if you modify this and let others use it over a network, you must offer
-them your source.
+AGPL-3.0, matching Aether.
+
+## Versioning
+
+Tags follow `MAJOR.MINOR.PATCH`. The `MAJOR` version is `0` until the app
+proves itself in real use on restricted networks; `1.0.0` will be the first
+release considered feature-complete and stable.
+
+- `v0.1.0` — first public release.
+- `v0.1.1` — app icon and menu-bar artwork.
+

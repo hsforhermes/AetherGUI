@@ -6,5 +6,12 @@ AetherGUI
 # ./make-verge-profile.sh whenever your subscription changes.
 verge-aether.yaml
 
+# Generated icon sizes. Only the source artwork is tracked; build.sh and
+# iconutil regenerate these.
+assets/AppIcon.iconset/
+assets/AppIcon.icns
+assets/menubar_*.png
+assets/menubar_crop.jpg
+
 # macOS
 .DS_Store
